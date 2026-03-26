@@ -1,0 +1,25 @@
+{
+  "name": "cloudcord",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Discord bot for publishing local services through Cloudflare Tunnel.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "node --test --import tsx test/**/*.test.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "discord.js": "^14.19.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
