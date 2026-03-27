@@ -9,7 +9,7 @@ import {
 } from "discord.js";
 import { Logger } from "../logger";
 import { PublicationManager } from "../services/publication-manager";
-import { PublicationRecord, PublishModePreference } from "../types";
+import { AliasListItem, PublishModePreference, PublicationRecord } from "../types";
 import { buildCommandDefinitions } from "./command-definitions";
 
 export class BotApp {
@@ -35,7 +35,7 @@ export class BotApp {
           await this.registerCommands(guild);
           this.logger.info("Discord bot is ready.", {
             guildId: guild.id,
-            commandCount: 4
+            commandCount: 5
           });
           settled = true;
           resolve();
@@ -112,11 +112,14 @@ export class BotApp {
       await interaction.deferReply();
 
       switch (interaction.commandName) {
+        case "add":
+          await this.handleAdd(interaction);
+          return;
+        case "remove":
+          await this.handleRemove(interaction);
+          return;
         case "list":
           await this.handleList(interaction);
-          return;
-        case "status":
-          await this.handleStatus(interaction);
           return;
         case "publish":
           await this.handlePublish(interaction);
@@ -149,176 +152,160 @@ export class BotApp {
     }
   }
 
-  private async handleList(interaction: ChatInputCommandInteraction): Promise<void> {
-    const records = await this.publicationManager.listPublications();
+  private async handleAdd(interaction: ChatInputCommandInteraction): Promise<void> {
+    const name = interaction.options.getString("unique_name", true);
+    const target = interaction.options.getString("local_url", true);
+    const actor = this.actorFromInteraction(interaction);
+
+    const result = await this.publicationManager.addAlias(name, target, actor);
+    const item = await this.requireAlias(result.alias.name);
     await interaction.editReply({
-      embeds: [this.buildListEmbed(records)]
+      embeds: [this.buildAliasSavedEmbed(item, result.created)]
     });
   }
 
-  private async handleStatus(interaction: ChatInputCommandInteraction): Promise<void> {
-    const id = interaction.options.getString("id");
-    if (!id) {
-      const records = await this.publicationManager.listPublications();
-      await interaction.editReply({
-        embeds: [this.buildListEmbed(records)]
-      });
-      return;
-    }
+  private async handleRemove(interaction: ChatInputCommandInteraction): Promise<void> {
+    const name = interaction.options.getString("unique_name", true);
+    const actor = this.actorFromInteraction(interaction);
 
-    const record = await this.publicationManager.getPublication(id);
-    if (!record) {
-      await interaction.editReply({
-        embeds: [
-          this.buildWarningEmbed(
-            "Publication Not Found",
-            `No publication was found for ID \`${id}\`.`
-          )
-        ]
-      });
-      return;
-    }
-
+    const result = await this.publicationManager.removeAlias(name, actor);
     await interaction.editReply({
-      embeds: [this.buildStatusEmbed(record)]
+      embeds: [this.buildAliasRemovedEmbed(result.alias.name, result.unpublishedRecord)]
+    });
+  }
+
+  private async handleList(interaction: ChatInputCommandInteraction): Promise<void> {
+    const aliases = await this.publicationManager.listAliases();
+    await interaction.editReply({
+      embeds: [this.buildListEmbed(aliases)]
     });
   }
 
   private async handlePublish(interaction: ChatInputCommandInteraction): Promise<void> {
-    const target = interaction.options.getString("target", true);
+    const name = interaction.options.getString("unique_name", true);
     const mode = (interaction.options.getString("mode") ?? "auto") as PublishModePreference;
-    const actor = {
-      discordUserId: interaction.user.id,
-      discordTag: interaction.user.tag
-    };
+    const actor = this.actorFromInteraction(interaction);
 
-    const result = await this.publicationManager.publishTarget(target, mode, actor);
+    const result = await this.publicationManager.publishAlias(name, mode, actor);
+    const item = await this.requireAlias(result.alias.name);
     await interaction.editReply({
-      embeds: [this.buildPublishEmbed(result.record, result.alreadyPublished)]
+      embeds: [this.buildPublishEmbed(item, result.record, result.alreadyPublished)]
     });
   }
 
   private async handleUnpublish(interaction: ChatInputCommandInteraction): Promise<void> {
-    const id = interaction.options.getString("id", true);
-    const actor = {
-      discordUserId: interaction.user.id,
-      discordTag: interaction.user.tag
-    };
+    const name = interaction.options.getString("unique_name", true);
+    const actor = this.actorFromInteraction(interaction);
 
-    const result = await this.publicationManager.unpublish(id, actor);
+    const result = await this.publicationManager.unpublishAlias(name, actor);
     await interaction.editReply({
-      embeds: [this.buildUnpublishEmbed(result.record, result.alreadyInactive)]
+      embeds: [this.buildUnpublishEmbed(result.alias.name, result.record, result.alreadyInactive)]
     });
   }
 
-  private buildListEmbed(records: PublicationRecord[]): EmbedBuilder {
+  private async requireAlias(name: string): Promise<AliasListItem> {
+    const item = await this.publicationManager.getAlias(name);
+    if (!item) {
+      throw new Error(`Alias "${name}" could not be loaded after the operation.`);
+    }
+
+    return item;
+  }
+
+  private actorFromInteraction(interaction: ChatInputCommandInteraction) {
+    return {
+      discordUserId: interaction.user.id,
+      discordTag: interaction.user.tag
+    };
+  }
+
+  private buildListEmbed(items: AliasListItem[]): EmbedBuilder {
     const embed = new EmbedBuilder()
       .setColor(0x4f8cff)
-      .setTitle("Cloudcord Publications")
-      .setDescription(
-        records.length === 0
-          ? "No active or stale publications found."
-          : "Showing active and stale publications."
-      )
+      .setTitle("Cloudcord Aliases")
+      .setDescription(items.length === 0 ? "No aliases saved yet." : "Showing saved aliases and their current status.")
       .setTimestamp(new Date());
 
-    if (records.length === 0) {
+    if (items.length === 0) {
       return embed;
     }
 
-    const visibleRecords = records.slice(0, 15);
-    for (const record of visibleRecords) {
+    const visibleItems = items.slice(0, 15);
+    for (const item of visibleItems) {
       embed.addFields({
-        name: `[${record.status.toUpperCase()}] ${record.id}`,
+        name: `[${item.status.toUpperCase()}] ${item.alias.name}`,
         value: [
-          `**Mode:** \`${record.mode}\``,
-          `**Target:** \`${record.resolvedTarget}\``,
-          `**Public URL:** ${this.formatUrl(record.publicUrl)}`
+          `**Target:** \`${item.alias.resolvedTarget}\``,
+          `**Public URL:** ${item.publication ? this.formatUrl(item.publication.publicUrl) : "Not published"}`,
+          `**Mode:** ${item.publication ? `\`${item.publication.mode}\`` : "Not published"}`
         ].join("\n"),
         inline: false
       });
     }
 
-    if (records.length > visibleRecords.length) {
+    if (items.length > visibleItems.length) {
       embed.setFooter({
-        text: `${records.length - visibleRecords.length} more publication(s) not shown`
+        text: `${items.length - visibleItems.length} more alias(es) not shown`
       });
     }
 
     return embed;
   }
 
-  private buildStatusEmbed(record: PublicationRecord): EmbedBuilder {
-    const embed = new EmbedBuilder()
-      .setColor(this.statusColor(record.status))
-      .setTitle(`Publication ${record.id}`)
-      .setURL(record.publicUrl)
-      .setDescription(record.status.toUpperCase())
+  private buildAliasSavedEmbed(item: AliasListItem, created: boolean): EmbedBuilder {
+    return new EmbedBuilder()
+      .setColor(created ? 0x22c55e : 0xf59e0b)
+      .setTitle(created ? "Alias Saved" : "Alias Updated")
+      .setDescription(
+        created
+          ? "Cloudcord saved the alias and validated the local target."
+          : "Cloudcord updated the alias target and kept the saved name."
+      )
       .addFields(
         {
-          name: "Public URL",
-          value: this.formatUrl(record.publicUrl),
+          name: "Alias",
+          value: `\`${item.alias.name}\``,
+          inline: true
+        },
+        {
+          name: "Status",
+          value: item.status.toUpperCase(),
+          inline: true
+        },
+        {
+          name: "Local URL",
+          value: `\`${item.alias.requestedTarget}\``,
           inline: false
         },
         {
           name: "Resolved Target",
-          value: `\`${record.resolvedTarget}\``,
+          value: `\`${item.alias.resolvedTarget}\``,
           inline: false
-        },
-        {
-          name: "Mode",
-          value: `\`${record.mode}\``,
-          inline: true
-        },
-        {
-          name: "Created",
-          value: this.formatTimestamp(record.createdAt),
-          inline: true
-        },
-        {
-          name: "Updated",
-          value: this.formatTimestamp(record.updatedAt),
-          inline: true
         }
       )
-      .setTimestamp(new Date(record.updatedAt));
+      .setTimestamp(new Date(item.alias.updatedAt));
+  }
 
-    if (record.requestedTarget !== record.resolvedTarget) {
-      embed.addFields({
-        name: "Requested Target",
-        value: `\`${record.requestedTarget}\``,
-        inline: false
-      });
-    }
+  private buildAliasRemovedEmbed(aliasName: string, unpublishedRecord?: PublicationRecord): EmbedBuilder {
+    const description = unpublishedRecord
+      ? "The alias was active, so Cloudcord unpublished it before removing the saved name."
+      : "The alias has been removed."
 
-    if (record.hostname) {
-      embed.addFields({
-        name: "Hostname",
-        value: `\`${record.hostname}\``,
+    const embed = new EmbedBuilder()
+      .setColor(0xef4444)
+      .setTitle("Alias Removed")
+      .setDescription(description)
+      .addFields({
+        name: "Alias",
+        value: `\`${aliasName}\``,
         inline: true
-      });
-    }
+      })
+      .setTimestamp(new Date());
 
-    if (record.stoppedAt) {
+    if (unpublishedRecord) {
       embed.addFields({
-        name: "Stopped",
-        value: this.formatTimestamp(record.stoppedAt),
-        inline: true
-      });
-    }
-
-    if (record.actorTag) {
-      embed.addFields({
-        name: "Last Actor",
-        value: record.actorTag,
-        inline: true
-      });
-    }
-
-    if (record.exitReason) {
-      embed.addFields({
-        name: "Exit Reason",
-        value: `\`${record.exitReason}\``,
+        name: "Stopped Public URL",
+        value: this.formatUrl(unpublishedRecord.publicUrl),
         inline: false
       });
     }
@@ -326,20 +313,20 @@ export class BotApp {
     return embed;
   }
 
-  private buildPublishEmbed(record: PublicationRecord, alreadyPublished: boolean): EmbedBuilder {
+  private buildPublishEmbed(item: AliasListItem, record: PublicationRecord, alreadyPublished: boolean): EmbedBuilder {
     return new EmbedBuilder()
       .setColor(alreadyPublished ? 0x4f8cff : 0x22c55e)
-      .setTitle(alreadyPublished ? "Publication Already Active" : "Publication Created")
+      .setTitle(alreadyPublished ? "Alias Already Published" : "Alias Published")
       .setURL(record.publicUrl)
       .setDescription(
         alreadyPublished
-          ? "Cloudcord found an existing active publication for this target."
-          : "The target is now exposed through Cloudflare Tunnel."
+          ? "Cloudcord found an existing active publication for this alias."
+          : "The alias is now exposed through Cloudflare Tunnel."
       )
       .addFields(
         {
-          name: "ID",
-          value: `\`${record.id}\``,
+          name: "Alias",
+          value: `\`${item.alias.name}\``,
           inline: true
         },
         {
@@ -349,7 +336,7 @@ export class BotApp {
         },
         {
           name: "Status",
-          value: record.status.toUpperCase(),
+          value: item.status.toUpperCase(),
           inline: true
         },
         {
@@ -366,20 +353,19 @@ export class BotApp {
       .setTimestamp(new Date(record.updatedAt));
   }
 
-  private buildUnpublishEmbed(record: PublicationRecord, alreadyInactive: boolean): EmbedBuilder {
+  private buildUnpublishEmbed(aliasName: string, record: PublicationRecord, alreadyInactive: boolean): EmbedBuilder {
     return new EmbedBuilder()
       .setColor(alreadyInactive ? 0xf59e0b : 0xef4444)
-      .setTitle(alreadyInactive ? "Publication Already Inactive" : "Publication Stopped")
-      .setURL(record.publicUrl)
+      .setTitle(alreadyInactive ? "Alias Already Inactive" : "Alias Unpublished")
       .setDescription(
         alreadyInactive
-          ? "That publication was already inactive when the command was processed."
-          : "The publication has been stopped and is no longer active."
+          ? "That alias was already not running, and the active link was cleared."
+          : "The alias publication has been stopped."
       )
       .addFields(
         {
-          name: "ID",
-          value: `\`${record.id}\``,
+          name: "Alias",
+          value: `\`${aliasName}\``,
           inline: true
         },
         {
@@ -388,7 +374,7 @@ export class BotApp {
           inline: true
         },
         {
-          name: "Status",
+          name: "Previous Status",
           value: record.status.toUpperCase(),
           inline: true
         },
@@ -414,34 +400,8 @@ export class BotApp {
       .setTimestamp(new Date());
   }
 
-  private buildWarningEmbed(title: string, description: string): EmbedBuilder {
-    return new EmbedBuilder()
-      .setColor(0xf59e0b)
-      .setTitle(title)
-      .setDescription(description)
-      .setTimestamp(new Date());
-  }
-
-  private statusColor(status: PublicationRecord["status"]): number {
-    switch (status) {
-      case "active":
-        return 0x22c55e;
-      case "inactive":
-        return 0x6b7280;
-      case "stale":
-        return 0xf59e0b;
-      case "error":
-        return 0xef4444;
-    }
-  }
-
   private formatUrl(url: string): string {
     return url;
-  }
-
-  private formatTimestamp(isoTimestamp: string): string {
-    const unix = Math.floor(new Date(isoTimestamp).getTime() / 1000);
-    return `<t:${unix}:f>`;
   }
 
   private renderError(error: unknown): string {

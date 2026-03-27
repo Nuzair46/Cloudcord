@@ -55,10 +55,12 @@ export interface ActorContext {
 export type PublicationMode = "quick" | "named";
 export type PublishModePreference = "auto" | "quick" | "named";
 export type PublicationStatus = "active" | "inactive" | "stale" | "error";
+export type AliasStatus = "active" | "stale" | "unpublished";
 
 export interface PublicationRecord {
   id: string;
   mode: PublicationMode;
+  aliasName?: string;
   requestedTarget: string;
   resolvedTarget: string;
   publicUrl: string;
@@ -70,6 +72,23 @@ export interface PublicationRecord {
   actorId?: string;
   actorTag?: string;
   exitReason?: string;
+}
+
+export interface AliasRecord {
+  name: string;
+  requestedTarget: string;
+  resolvedTarget: string;
+  currentPublicationId?: string;
+  createdAt: string;
+  updatedAt: string;
+  actorId?: string;
+  actorTag?: string;
+}
+
+export interface AliasListItem {
+  alias: AliasRecord;
+  publication?: PublicationRecord;
+  status: AliasStatus;
 }
 
 export interface TargetResolution {

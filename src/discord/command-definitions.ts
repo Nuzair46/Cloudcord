@@ -1,13 +1,39 @@
 import { RESTPostAPIChatInputApplicationCommandsJSONBody, SlashCommandBuilder } from "discord.js";
 
 export function buildCommandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSONBody[] {
-  const publishCommand = new SlashCommandBuilder()
-    .setName("publish")
-    .setDescription("Publish a local target through Cloudflare Tunnel.")
+  const addCommand = new SlashCommandBuilder()
+    .setName("add")
+    .setDescription("Save a local target URL under a reusable alias.")
     .addStringOption((option) =>
       option
-        .setName("target")
+        .setName("unique_name")
+        .setDescription("Alias name, for example my-app")
+        .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("local_url")
         .setDescription("Full local target URL, for example http://localhost:3000")
+        .setRequired(true)
+    );
+
+  const removeCommand = new SlashCommandBuilder()
+    .setName("remove")
+    .setDescription("Delete a saved alias and stop it first if it is active.")
+    .addStringOption((option) =>
+      option
+        .setName("unique_name")
+        .setDescription("Alias name")
+        .setRequired(true)
+    );
+
+  const publishCommand = new SlashCommandBuilder()
+    .setName("publish")
+    .setDescription("Publish a saved alias through Cloudflare Tunnel.")
+    .addStringOption((option) =>
+      option
+        .setName("unique_name")
+        .setDescription("Alias name")
         .setRequired(true)
     )
     .addStringOption((option) =>
@@ -24,31 +50,22 @@ export function buildCommandDefinitions(): RESTPostAPIChatInputApplicationComman
 
   const unpublishCommand = new SlashCommandBuilder()
     .setName("unpublish")
-    .setDescription("Stop a published tunnel by publication ID.")
+    .setDescription("Stop a published alias.")
     .addStringOption((option) =>
       option
-        .setName("id")
-        .setDescription("Publication ID returned by /publish")
+        .setName("unique_name")
+        .setDescription("Alias name")
         .setRequired(true)
-    );
-
-  const statusCommand = new SlashCommandBuilder()
-    .setName("status")
-    .setDescription("Show status for one publication or all publications.")
-    .addStringOption((option) =>
-      option
-        .setName("id")
-        .setDescription("Publication ID")
-        .setRequired(false)
     );
 
   const listCommand = new SlashCommandBuilder()
     .setName("list")
-    .setDescription("List publications known to the bot.");
+    .setDescription("List saved aliases and their current status.");
 
   return [
+    addCommand.toJSON(),
+    removeCommand.toJSON(),
     listCommand.toJSON(),
-    statusCommand.toJSON(),
     publishCommand.toJSON(),
     unpublishCommand.toJSON()
   ];

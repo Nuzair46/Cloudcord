@@ -16,15 +16,21 @@ It is designed for local Docker deployments and small self-hosted setups where y
 
 ## Features
 
-- Publish any local `http` or `https` target from Discord
+- Save local targets under reusable alias names
+- Publish aliases from Discord without retyping the local URL
 - Use free Cloudflare quick tunnels or a named tunnel
-- Persist publication history
+- Persist alias and publication history in SQLite
 - Run as a single Docker service
 - Work with host apps and same-network Docker services
 
 ## How It Works
 
-Cloudcord accepts Discord slash commands and creates one of these:
+Cloudcord accepts Discord slash commands and works in two steps:
+
+1. Save a local target URL under an alias with `/add`
+2. Publish or unpublish that alias on demand
+
+When you publish an alias, Cloudcord creates one of these:
 
 - A quick tunnel with a random `trycloudflare.com` URL
 - A named-tunnel route under your own base domain
@@ -33,12 +39,36 @@ Quick tunnels are used when named-tunnel settings are not configured, or when th
 
 ## Commands
 
-- `/publish target:<url> mode:<auto|quick|named>`
-- `/unpublish id:<publication-id>`
-- `/status [id]`
+- `/add unique_name:<alias> local_url:<url>`
+- `/remove unique_name:<alias>`
+- `/publish unique_name:<alias> [mode:<auto|quick|named>]`
+- `/unpublish unique_name:<alias>`
 - `/list`
 
 Command replies are public in the configured Discord channel.
+
+## Alias Rules
+
+- Alias names are normalized to lowercase
+- Alias names may contain only letters, numbers, and hyphens
+- Updating an alias target while it is actively published is rejected; unpublish it first
+- Removing an active alias automatically unpublishes it first
+
+## Named Tunnel Hostnames
+
+When named mode is used, Cloudcord publishes the alias at:
+
+```text
+https://<unique_name>.<CLOUDFLARE_BASE_DOMAIN>
+```
+
+Example:
+
+- Alias: `docs-api`
+- Base domain: `dev.example.com`
+- Public URL: `https://docs-api.dev.example.com`
+
+This makes named URLs stable across republish operations for the same alias.
 
 ## Requirements
 
@@ -120,7 +150,7 @@ Cloudcord does not create a named tunnel for you. It expects one existing Cloudf
    CLOUDFLARE_BASE_DOMAIN=dev.example.com
    ```
 
-`CLOUDFLARE_BASE_DOMAIN` must be a domain or subdomain in a zone managed by your Cloudflare account. Cloudcord will generate hostnames under that base domain.
+`CLOUDFLARE_BASE_DOMAIN` must be a domain or subdomain in a zone managed by your Cloudflare account. Cloudcord publishes each named alias under that base domain.
 
 You do not need to run `cloudflared` manually outside this project. The Docker container runs it for you.
 
@@ -144,7 +174,7 @@ Only local targets are accepted by default. Public internet hostnames are reject
 
 ## Security Model
 
-Anyone who can use the configured Discord channel can publish or unpublish local services through the bot.
+Anyone who can use the configured Discord channel can add, publish, unpublish, or remove aliases through the bot.
 
 If that is too broad for your setup, do not expose the bot in a shared channel without adding stricter authorization first.
 
